@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <title>ELM</title>
+
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+    integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/dygraph/2.1.0/dygraph.css"
+    integrity="sha256-pHM5Z7zWPmme9MLjqlTNWdTwInprJ1fCXSdQje92k4w=" crossorigin="anonymous" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dygraph/2.1.0/dygraph.js"
+    integrity="sha256-E7nBugZ/YuTywPG7MCezJ/wRiTIC3Bb0wiAYoLAkYg8=" crossorigin="anonymous"></script>
+
+  <script src="https://code.jquery.com/jquery-3.4.1.min.js"
+    integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo=" crossorigin="anonymous"></script>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"
+    integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1"
+    crossorigin="anonymous"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"
+    integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM"
+    crossorigin="anonymous"></script>
+  <script>
+    var ws
+    var timer_id
+    var activeUsersOverTimeData
+    var transPerSecondData
+    var tranTimesPercentilesData
+    var forceClose = false
+    var activeUsersOverTimeGl
+    var transPerSecondGl
+    var tranTimesPercentilesGl
+
+    function s_to_dt(s) {
+      return new Date(s * 1000)
+    }
+
+    function us_to_ms(us) {
+      return Number((us / 1000).toFixed(0))
+    }
+
+    function update_activeUsersOverTimeGl(data) {
+      if (!data || !data.length)
+        return
+
+      if (!activeUsersOverTimeGl) {
+        activeUsersOverTimeData = data.map(function (m) { return [s_to_dt(m.x), m.y] })
+        activeUsersOverTimeGl = new Dygraph(document.getElementById('activeUsersOverTime'), activeUsersOverTimeData, {
+          legend: 'always',
+          title: 'Active users over time',
+          ylabel: 'Number of users',
+          xlabel: 'Date',
+          strokeWidth: 1.5
+        })
+      }
+      else {
+        data.map(function (m) { return [s_to_dt(m.x), m.y] }).forEach(function (a) { activeUsersOverTimeData.push(a) })
+        activeUsersOverTimeGl.updateOptions({ 'file': activeUsersOverTimeData });
+      }
+    }
+    function update_transPerSecondGl(data) {
+      if (!data || !data.length)
+        return
+
+      if (!transPerSecondGl) {
+        transPerSecondData = data.map(function (m) { return [s_to_dt(m.x), m.y] })
+        transPerSecondGl = new Dygraph(document.getElementById('transPerSecond'), transPerSecondData, {
+          legend: 'always',
+          title: 'Transactions per second',
+          ylabel: 'Number of transactions',
+          xlabel: 'Date',
+          strokeWidth: 1.5
+        })
+      }
+      else {
+        data.map(function (m) { return [s_to_dt(m.x), m.y] }).forEach(function (a) { transPerSecondData.push(a) })
+        transPerSecondGl.updateOptions({ 'file': transPerSecondData });
+      }
+    }
+    function update_tranTimesPercentilesGl(data) {
+      if (!data || !data.length)
+        return
+
+      if (!tranTimesPercentilesGl) {
+        tranTimesPercentilesData = data.map(function (m) { return [m.x, us_to_ms(m.y)] })
+        tranTimesPercentilesGl = new Dygraph(document.getElementById('tranTimesPercentiles'), tranTimesPercentilesData, {
+          legend: 'always',
+          title: 'Transaction times percentiles',
+          ylabel: 'Transaction time (ms)',
+          xlabel: 'Percentile',
+          strokeWidth: 1.5
+        })
+      }
+      else {
+        tranTimesPercentilesData.splice(0, tranTimesPercentilesData.length)
+        data.map(function (m) { return [m.x, us_to_ms(m.y)] }).forEach(function (a) { tranTimesPercentilesData.push(a) })
+        tranTimesPercentilesGl.updateOptions({ 'file': tranTimesPercentilesData });
+      }
+    }
+
+    function on_load() {
+      ws = null
+
+      $.getJSON('/api/testplans', function (data) {
+        var s = $('select[name="testplans"]')
+        s.children().remove()
+        data.forEach(e => {
+          s.append($('<option></option>').text(e).val(e))
+        })
+      })
+
+      $.getJSON('/api/status', function (status) {
+        if (is_down(status)) {
+          $('div[name="spinner-row"]').hide()
+          $('div[name="choose-plan-row"]').show()
+        }
+        else {
+          ws_connect()
+        }
+      })
+    }
+
+    function show_alert(msg) {
+      var alert = $('<div class="alert alert-danger alert-dismissible fade show col-12" role="alert"></div>')
+      var text = $('<span></span>').text(JSNO.stringify(msg))
+      var dismiss = $('<button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>')
+
+      $('div[name="alerts-row"]').append($(alert).append(text).append(dismiss))
+    }
+
+    function is_down(status) {
+      for (var i in status) {
+        if (status[i].status.controller != 'down' || status[i].test != null)
+          return false
+      }
+      return true
+    }
+
+    function timeToDisplay(us) {
+      var seconds = (us / 1000000).toFixed(0);
+      var minutes = Math.floor(seconds / 60);
+      var hours = "";
+      if (minutes > 59) {
+        hours = Math.floor(minutes / 60);
+        hours = (hours >= 10) ? hours : "0" + hours;
+        minutes = minutes - (hours * 60);
+        minutes = (minutes >= 10) ? minutes : "0" + minutes;
+      }
+
+      seconds = Math.floor(seconds % 60);
+      seconds = (seconds >= 10) ? seconds : "0" + seconds;
+      if (hours != "") {
+        return hours + ":" + minutes + ":" + seconds;
+      }
+      return minutes + ":" + seconds;
+    }
+
+    function update_nodes(st) {
+      function get_or_create_div_node(container, node_id) {
+        var div = container.find('div[name="' + encodeURIComponent(node_id) + '"]')
+        if (!div.length) {
+          div = $('<div class="card w-25" style="margin: 4px;"></div>').attr('name', encodeURIComponent(node_id))
+          var div_body = $('<div class="card-body"></div>')
+          var card_title = $('<h6 class="card-title"></h6>').text(node_id)
+          var controller_status = $('<p>Controller: <span name="controller" class="badge"></span></p>')
+          var generator_status = $('<p>Generator: <span name="generator" class="badge"></span></p>')
+          div.append(div_body.append(card_title).append(controller_status).append(generator_status))
+          container.append(div)
+        }
+        return div
+      }
+
+      var container = $('div[name="report-nodes"]')
+      for (var i in st.node) {
+        var st_node = st.node[i]
+        var div_node = get_or_create_div_node(container, st_node.id)
+        var controller_class = '';
+        var generator_class = st_node.status.generator > 0 ? 'badge-success' : 'badge-secondary';
+        switch (st_node.status.controller) {
+          case 'up':
+            controller_class = 'badge-success'
+            break;
+          case 'stopping':
+            controller_class = 'badge-warning'
+            break;
+          default:
+            controller_class = 'badge-secondary'
+            break;
+        }
+        div_node.find('span[name="controller"]').removeClass('badge-secondary').removeClass('badge-success').removeClass('badge-warning').text(':' + st_node.status.controller).addClass(controller_class)
+        div_node.find('span[name="generator"]').removeClass('badge-secondary').removeClass('badge-success').text(st_node.status.generator).addClass(generator_class)
+      }
+    }
+
+    function update_test(st) {
+      var test_status = $('span[name="report-test-status"]')
+      test_status.removeClass('badge-success').removeClass('badge-warning').text(':completed').addClass('badge-success')
+      $('button[name=stop]').hide()
+      $('button[name=start-new]').show()
+      for (var i in st.node) {
+        if (st.node[i].status.controller != 'down') {
+          test_status.removeClass('badge-success').removeClass('badge-warning').text(st.node[i].status.controller == 'up' ? ':running' : ':stopping').addClass(st.node[i].status.controller == 'up' ? 'badge-success' : 'badge-warning')
+          $('button[name=stop]').show()
+          $('button[name=start-new]').hide()
+        }
+      }
+
+      $('span[name="test-plan"]').text(st.stat.name)
+      $('span[name="start-time"]').text(new Date(st.stat.start_time / 1000).toString())
+      if (st.stat.remaining_time == 0) {
+        $('span[name="stop-time"]').parent().show()
+        $('span[name="time-left"]').parent().hide()
+        $('span[name="stop-time"]').text(new Date(st.stat.stop_time / 1000).toString())
+      }
+      else {
+        $('span[name="stop-time"]').parent().hide()
+        $('span[name="time-left"]').parent().show()
+        $('span[name="time-left"]').text(timeToDisplay(st.stat.remaining_time))
+      }
+      $('span[name="error-count"]').text(st.stat.error_count).removeClass('badge-success').removeClass('badge-danger').addClass(st.stat.error_count > 0 ? 'badge-danger' : 'badge-success')
+      $('span[name="tran-count"]').text(st.stat.tran_count)
+
+      update_activeUsersOverTimeGl(st.test.active_users_over_time)
+      update_transPerSecondGl(st.test.tps)
+      update_tranTimesPercentilesGl(st.test.ttp)
+    }
+
+    function ws_connect(url) {
+      forceClose = false
+      if (!url) {
+        url = ((window.location.protocol === "https:") ? "wss://" : "ws://") + window.location.host + "/ws"
+      }
+      ws = new WebSocket(url)
+      ws.onopen = function (e) {
+      }
+      ws.onclose = function (e) {
+        if (!forceClose) {
+          $('div[name="spinner-row"]').show()
+          $('div[name="show-report-row"]').hide()
+          on_load()
+        }
+      }
+      ws.onerror = function (e) {
+        show_alert(e)
+      }
+      ws.onmessage = function (msg) {
+        var st = JSON.parse(msg.data)
+        if (st.command == 'reconnect') {
+          ws_connect(((window.location.protocol === "https:") ? "wss://" : "ws://") + st.node + "/ws")
+        }
+        else {
+          $('div[name="spinner-row"]').hide()
+          $('div[name="show-report-row"]').show()
+          update_nodes(st)
+          update_test(st)
+        }
+      }
+      timer_id = setInterval(function () {
+        ws.send(JSON.stringify({ type: "ping" }))
+      }, 30000)
+    }
+
+    $(document).ready(function () {
+      $('button[name=start]').click(function () {
+        $.post('/api/start/' + encodeURIComponent($('select[name="testplans"]').val()), function () {
+          $('div[name="spinner-row"]').show()
+          $('div[name="choose-plan-row"]').hide()
+          ws_connect()
+        }).fail(function (e) {
+          show_alert(e)
+        })
+      })
+
+      $('button[name=stop]').click(function () {
+        $.post('/api/stop').fail(function (e) {
+          show_alert(e)
+        })
+      })
+
+      $('button[name=start-new]').click(function () {
+        forceClose = true
+        ws.close()
+        clearInterval(timer_id)
+        ws = null
+        timer_id = null
+        activeUsersOverTimeGl = null
+        transPerSecondGl = null
+        tranTimesPercentilesGl = null
+
+
+        $('div[name="show-report-row"]').hide()
+        $('div[name="choose-plan-row"]').show()
+      })
+
+      on_load()
+    })
+  </script>
+</head>
+
+<body>
+  <div class="container">
+    <div class="row">
+      <div class="col-lg-12 px-4">
+        <div
+          class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+          <h4>Load Test Dashboard</h4>
+        </div>
+      </div>
+    </div>
+    <div class="row" name="alerts-row">
+    </div>
+    <div class="row" name="spinner-row">
+      <div class="col-lg-12 px-4">
+        <div class="d-flex justify-content-center">
+          <div class="spinner-border">
+            <span class="sr-only">Loading...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="row justify-content-md-center" name="choose-plan-row" style="display: none;">
+      <div class="card w-50">
+        <div class="card-header">
+          Choose a test plan to run:
+        </div>
+        <div class="card-body">
+          <div class="input-group">
+            <select name="testplans" class="custom-select">
+            </select>
+            <div class="input-group-append">
+              <button name="start" class="btn btn-outline-success" type="button">Start</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div name="show-report-row" style="display: none">
+      <div class="row">
+        <div class="col-lg-12 px-4">
+          <h5>Nodes status:</h5>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-lg-12 px-4">
+          <div class="d-flex flex-wrap" name="report-nodes">
+          </div>
+        </div>
+      </div>
+      <br />
+      <div class="row">
+        <div class="col-lg-12 px-4">
+          <div
+            class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+            <h5>Test status: <span name="report-test-status" class="badge"></span></h5>
+            <div class="btn-toolbar mb-2 mb-md-0">
+              <div class="mr-2">
+                <button name="stop" class="btn btn-sm btn-outline-danger" type="button">Terminate</button>
+                <button name="start-new" class="btn btn-sm btn-outline-danger" type="button"
+                  style="display: none;">Start new</button>
+                <!-- <button type="button" name="export" class="btn btn-sm btn-outline-primary"
+                  style="display: none;">Export</button> -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-lg-12 px-4">
+          <div class="row">
+            <div class="col-sm-4">
+              Test plan: <span name="test-plan"></span>
+            </div>
+            <div class="col-sm-4">
+              <p>Start time: <span name="start-time"></span></p>
+              <p>Stop time: <span name="stop-time"></span></p>
+              <p>Time left: <span name="time-left" class="badge badge-warning"></span></p>
+            </div>
+            <div class="col-sm-4">
+              <p>Total error count: <span name="error-count" class="badge badge-success">0</span></p>
+              <p>Total transactions count: <span name="tran-count" class="badge badge-success">0</span></p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <br />
+      <div class="row">
+        <div class="col-lg-12 px-4">
+          <div id="activeUsersOverTime" style="height: 400px; width: 100%;">
+            <div class="d-flex justify-content-center">
+              <div class="spinner-border">
+                <span class="sr-only">Loading...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <br />
+      <div class="row">
+        <div class="col-lg-12 px-4">
+          <div id="transPerSecond" style="height: 400px; width: 100%;">
+            <div class="d-flex justify-content-center">
+              <div class="spinner-border">
+                <span class="sr-only">Loading...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <br />
+      <div class="row">
+        <div class="col-lg-12 px-4">
+          <div id="tranTimesPercentiles" style="height: 400px; width: 100%;">
+            <div class="d-flex justify-content-center">
+              <div class="spinner-border">
+                <span class="sr-only">Loading...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <br />
+    <footer style="height: 100px;"></footer>
+  </div>
+</body>
+
+</html>
