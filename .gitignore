@@ -30,3 +30,6 @@ elm-*.tar
 
 # Ignore macOS folders
 .DS_Store
+
+# Ignore local mix.lock file
+mix.lock
