@@ -1,149 +1,159 @@
 defmodule Postcard do
   require Logger
-  use ELM.User
+  import ELM.User
+  @behaviour ELM.User
 
-  main(:home)
+  def init(_) do
+    conn = connect("192.168.1.175", 5000)
 
-  defp get!(url) do
-    # Process.sleep(:rand.uniform(100))
-    _ = :httpc.request(:get, {String.to_charlist(url), []}, [], [])
+    {conn, :home}
   end
 
-  def home(_opts) do
-    _ = get!("http://192.168.1.175:5000")
-
-    {:pacing, 1000, :open_country,
-     Enum.random([
-       "Австралия",
-       "Австрия",
-       "Армения",
-       "Бельгия",
-       "Болгария",
-       "Босния и Герцеговина",
-       "Венгрия",
-       "Германия",
-       "Германия - ГДР",
-       "Греция",
-       "Грузия",
-       "Египет",
-       "Израиль",
-       "Ирландия",
-       "Испания",
-       "Италия",
-       "Казахстан",
-       "Кипр",
-       "Киргизия",
-       "Китай",
-       "Куба",
-       "Мальта",
-       "Монголия",
-       "Нидерланды",
-       "Парагвай",
-       "Польша",
-       "Португалия",
-       "Россия",
-       "Румыния",
-       "Сербия",
-       "Словакия",
-       "СССР",
-       "США",
-       "Таджикистан",
-       "Таиланд",
-       "Танзания",
-       "Турция",
-       "Уганда",
-       "Украина",
-       "Франция",
-       "Чехия",
-       "Чехословакия",
-       "Швейцария"
-     ])}
+  def dispose(conn) do
+    close(conn)
   end
 
-  def open_country(name) do
-    _ = get!("http://192.168.1.175:5000/country/" <> URI.encode(name))
+  def home(conn, _) do
+    _ = get(conn, "/")
 
-    {:pacing, 1000, :open_coin, 2}
+    {conn,
+     {:pacing, 1000,
+      {:open_country,
+       Enum.random([
+         "Австралия",
+         "Австрия",
+         "Армения",
+         "Бельгия",
+         "Болгария",
+         "Босния и Герцеговина",
+         "Венгрия",
+         "Германия",
+         "Германия - ГДР",
+         "Греция",
+         "Грузия",
+         "Египет",
+         "Израиль",
+         "Ирландия",
+         "Испания",
+         "Италия",
+         "Казахстан",
+         "Кипр",
+         "Киргизия",
+         "Китай",
+         "Куба",
+         "Мальта",
+         "Монголия",
+         "Нидерланды",
+         "Парагвай",
+         "Польша",
+         "Португалия",
+         "Россия",
+         "Румыния",
+         "Сербия",
+         "Словакия",
+         "СССР",
+         "США",
+         "Таджикистан",
+         "Таиланд",
+         "Танзания",
+         "Турция",
+         "Уганда",
+         "Украина",
+         "Франция",
+         "Чехия",
+         "Чехословакия",
+         "Швейцария"
+       ])}}}
   end
 
-  def open_coin(id) do
-    _ = get!("http://192.168.1.175:5000/coins/" <> Integer.to_string(id))
+  def open_country(conn, name) do
+    _ = get(conn, "/country/" <> URI.encode(name))
 
-    {:pacing, 1000, :open_postcards, []}
+    {conn, {:pacing, 1000, {:open_coin, 2}}}
   end
 
-  def open_postcards(_opts) do
-    _ = get!("http://192.168.1.175:5000/postcards")
+  def open_coin(conn, id) do
+    _ = get(conn, "/coins/" <> Integer.to_string(id))
 
-    {:pacing, 1000, :open_postcards_by_code,
-     Enum.random([
-       "AU",
-       "AT",
-       "BY",
-       "BE",
-       "GB"
-     ])}
+    {conn, {:pacing, 1000, {:open_postcards, []}}}
   end
 
-  def open_postcards_by_code(code) do
-    _ = get!("http://192.168.1.175:5000/country_postcards/" <> URI.encode(code))
+  def open_postcards(conn, _) do
+    _ = get(conn, "/postcards")
 
-    {:pacing, 1000, :open_postcard_by_id, "BE-638555"}
+    {conn,
+     {:pacing, 1000,
+      {:open_postcards_by_code,
+       Enum.random([
+         "AU",
+         "AT",
+         "BY",
+         "BE",
+         "GB"
+       ])}}}
   end
 
-  def open_postcard_by_id(id) do
-    _ = get!("http://192.168.1.175:5000/postcard/" <> id)
+  def open_postcards_by_code(conn, code) do
+    _ = get(conn, "/country_postcards/" <> URI.encode(code))
 
-    {:pacing, 1000, :open_stamps, []}
+    {conn, {:pacing, 1000, {:open_postcard_by_id, "BE-638555"}}}
   end
 
-  def open_stamps(_opts) do
-    _ = get!("http://192.168.1.175:5000/stamps")
+  def open_postcard_by_id(conn, id) do
+    _ = get(conn, "/postcard/" <> id)
 
-    {:pacing, {1000, 500}, :open_stamps_by_country,
-     Enum.random([
-       "Австралия",
-       "Австрия",
-       "Беларусь",
-       "Бельгия",
-       "Великобритания",
-       "Вьетнам",
-       "Германия",
-       "Гонконг",
-       "Индия",
-       "Индонезия",
-       "Италия",
-       "Казахстан",
-       "Китай",
-       "Корея Южная",
-       "Латвия",
-       "Литва",
-       "Нидерланды",
-       "Польша",
-       "Россия",
-       "США",
-       "Тайвань",
-       "Турция",
-       "Финляндия",
-       "Франция",
-       "Хорватия",
-       "Черногория",
-       "Чехия",
-       "Швейцария",
-       "Эстония",
-       "Япония"
-     ])}
+    {conn, {:pacing, {1000, 500}, {:open_stamps, []}}}
   end
 
-  def open_stamps_by_country(country) do
-    _ = get!("http://192.168.1.175:5000/country_stamps/" <> URI.encode(country))
+  def open_stamps(conn, _) do
+    _ = get(conn, "/stamps")
 
-    {:pacing, 1000, :open_stamp_by_id, 6}
+    {conn,
+     {:pacing, 1000,
+      {:open_stamps_by_country,
+       Enum.random([
+         "Австралия",
+         "Австрия",
+         "Беларусь",
+         "Бельгия",
+         "Великобритания",
+         "Вьетнам",
+         "Германия",
+         "Гонконг",
+         "Индия",
+         "Индонезия",
+         "Италия",
+         "Казахстан",
+         "Китай",
+         "Корея Южная",
+         "Латвия",
+         "Литва",
+         "Нидерланды",
+         "Польша",
+         "Россия",
+         "США",
+         "Тайвань",
+         "Турция",
+         "Финляндия",
+         "Франция",
+         "Хорватия",
+         "Черногория",
+         "Чехия",
+         "Швейцария",
+         "Эстония",
+         "Япония"
+       ])}}}
   end
 
-  def open_stamp_by_id(id) do
-    _ = get!("http://192.168.1.175:5000/stamp/" <> Integer.to_string(id))
+  def open_stamps_by_country(conn, country) do
+    _ = get(conn, "/country_stamps/" <> URI.encode(country))
 
-    :stop
+    {conn, {:pacing, 1000, {:open_stamp_by_id, 6}}}
+  end
+
+  def open_stamp_by_id(conn, id) do
+    _ = get(conn, "/stamp/" <> Integer.to_string(id))
+
+    {conn, :stop}
   end
 end

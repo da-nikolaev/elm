@@ -14,7 +14,7 @@ defmodule ELM.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger, :inets],
+      extra_applications: [:logger, :gun],
       mod: {ELM, []}
     ]
   end
@@ -22,8 +22,10 @@ defmodule ELM.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:cowlib, "~> 2.7.3", override: true},
       {:plug_cowboy, "~> 2.0"},
-      {:poison, "~> 3.1"}
+      {:poison, "~> 3.1"},
+      {:gun, "~> 1.3"}
     ]
   end
 end

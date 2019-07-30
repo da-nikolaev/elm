@@ -1,31 +1,43 @@
 defmodule ELM.User do
-  @doc false
-  defmacro __using__(_opts) do
-    quote do
-      import ELM.User
-      Module.register_attribute(__MODULE__, :main, accumulate: false)
+  @type session :: term()
+  @type tran :: atom() | {atom(), term()}
+  @type paicing :: number() | {number(), number()}
+  @type paicing_tran :: {:pacing, paicing(), tran()}
 
-      @before_compile ELM.User
-    end
+  @callback init(term()) :: {session(), tran()} | {session(), paicing_tran()}
+  @callback dispose(session()) :: :ok
+
+  def connect(
+        host,
+        port,
+        connect_opts \\ %{
+          connect_timeout: :timer.minutes(1),
+          retry: 10,
+          retry_timeout: 100,
+          http_opts: %{keepalive: :infinity},
+          http2_opts: %{keepalive: :infinity}
+        }
+      ) do
+    {:ok, conn} = :gun.open(String.to_charlist(host), port, connect_opts)
+    {:ok, _protocol} = :gun.await_up(conn)
+
+    conn
   end
 
-  @doc false
-  defmacro __before_compile__(env) do
-    ref = Module.get_attribute(env.module, :main)
-
-    quote do
-      def _main do
-        unquote(ref)
-      end
-    end
+  def close(conn) do
+    :gun.close(conn)
   end
 
-  @doc """
-  A macro that sets up the entry point of user's scenario
-  """
-  defmacro main(name) when is_atom(name) do
-    quote do
-      Module.put_attribute(__MODULE__, :main, unquote(name))
+  def get(conn, path) do
+    stream = :gun.get(conn, String.to_charlist(path))
+
+    case :gun.await(conn, stream, :timer.minutes(1)) do
+      {:response, :fin, status, headers} ->
+        {:ok, status, headers, nil}
+
+      {:response, :nofin, status, headers} ->
+        {:ok, body} = :gun.await_body(conn, stream)
+        {:ok, status, headers, body}
     end
   end
 end

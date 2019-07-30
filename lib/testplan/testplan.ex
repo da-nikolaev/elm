@@ -4,8 +4,8 @@ defmodule TestPlan do
   def test_postcard do
     user =
       pool("Postcard")
-      |> produce(500, 60)
-      |> hold_on(90)
+      |> produce(20, 60)
+      |> hold_on(240)
 
     [user]
   end

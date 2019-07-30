@@ -1,112 +1,132 @@
 defmodule ELM.UserExecutor do
   require Logger
+  use GenServer
+
+  # Client API
+
+  def start_link(opts) do
+    GenServer.start_link(__MODULE__, opts)
+  end
 
   # Server API
 
-  def run(type, args, callback) do
+  def init({type, args, callback}) do
     Process.flag(:trap_exit, true)
 
-    run_user(%{user_type: type, init_args: args, callback: callback})
+    do_restart()
+
+    {:ok,
+     %{
+       user_type: type,
+       init_args: args,
+       callback: callback,
+       session: nil,
+       stopping: false
+     }}
   end
 
-  def run_user(state) do
+  def handle_info({:init_session}, state) do
+    {_, {session, next}} = invoke(state[:user_type], :init, [state[:init_args]])
     on_start(state)
 
-    case execute_tran(:main, state[:init_args], state) do
-      :ok ->
-        receive do
-          {:EXIT, _from, _reason} ->
-            on_stop(state)
+    send(self(), {:execute_tran, next})
+    {:noreply, %{state | session: session}}
+  end
 
-          {:stop} ->
-            on_stop(state)
-        after
-          0 ->
-            on_stop(state)
-            run_user(state)
-        end
+  def handle_info({:execute_tran, tran}, state) do
+    unless state[:stopping] do
+      case tran do
+        {:pacing, time, tran} ->
+          normal_time = to_normal(time)
 
-      _ ->
-        :break
+          Process.send_after(self(), {:execute_tran, tran}, normal_time)
+          {:noreply, state}
+
+        tran ->
+          case do_tran(tran, state) do
+            {:ok, session} -> {:noreply, %{state | session: session}}
+            :error -> {:noreply, state}
+          end
+      end
+    else
+      on_stop(state)
+      {:noreply, state}
     end
   end
 
-  def execute_tran(name, args, state) do
+  def handle_info({:EXIT, _from, _reason}, state) do
+    {:noreply, stopping(state)}
+  end
+
+  def handle_info({:stop}, state) do
+    {:noreply, stopping(state)}
+  end
+
+  def handle_info(_msg, state) do
+    # Logger.debug("info #{inspect(msg)}")
+    {:noreply, state}
+  end
+
+  def terminate(_reason, state) do
+    {:noreply, stopping(state)}
+  end
+
+  defp stopping(state) do
+    %{state | stopping: true}
+  end
+
+  defp do_tran(tran, state) do
+    case tran do
+      {tran_name, tran_args} ->
+        do_tran(tran_name, tran_args, state)
+
+      tran_name ->
+        do_tran(tran_name, [], state)
+    end
+  end
+
+  defp do_tran(name, args, state) do
     try do
-      {us, next} = invoke(state[:user_type], name, args)
+      {us, {session, next}} = invoke(state[:user_type], name, [state[:session], args])
 
-      receive do
-        {:EXIT, _from, _reason} ->
-          on_stop(state)
-          :break
+      do_next(name, us, next, state)
 
-        {:stop} ->
-          on_stop(state)
-          :break
-      after
-        0 ->
-          do_next(name, us, next, state)
-      end
+      {:ok, session}
     rescue
       e ->
         on_error(e, state)
-        :break
+        do_restart()
+
+        :error
     end
   end
 
   defp do_next(name, us, next, state) do
     case next do
-      tran when is_atom(tran) and tran != :stop ->
-        on_tran_completed(state, name, us)
-        execute_tran(tran, [], state)
-
-      {tran, tran_args} when is_atom(tran) ->
-        on_tran_completed(state, name, us)
-        execute_tran(tran, tran_args, state)
-
-      {:pacing, time, tran, tran_args} when is_atom(tran) ->
-        on_tran_completed(state, name, us)
-
-        normal_time = to_normal(time)
-
-        receive do
-        after
-          normal_time ->
-            execute_tran(tran, tran_args, state)
-        end
-
       :stop ->
-        on_tran_completed(state, name, us)
-        :ok
+        on_stop(state)
+        do_restart()
 
       {:error, msg} ->
         on_error(msg, state)
-        :ok
+        do_restart()
 
-      _ ->
-        on_error(
-          "illegal state, the return expression must be of type :atom | {:atom, any} | :stop",
-          state
-        )
-
-        :ok
+      next_tran ->
+        on_tran_completed(state, name, us)
+        send(self(), {:execute_tran, next_tran})
     end
   end
 
+  defp do_restart() do
+    send(self(), {:init_session})
+  end
+
   defp invoke(user_type, tran, tran_args) do
-    :timer.tc(to_module(user_type), to_function(user_type, tran), [tran_args])
+    :timer.tc(to_module(user_type), tran, tran_args)
   end
 
   defp to_module(user_type) do
     String.to_atom("Elixir." <> user_type)
-  end
-
-  defp to_function(user_type, tran) do
-    if tran == :main do
-      apply(to_module(user_type), :_main, [])
-    else
-      tran
-    end
   end
 
   defp to_normal(time) do
@@ -129,6 +149,7 @@ defmodule ELM.UserExecutor do
   end
 
   defp on_stop(state) do
+    invoke(state[:user_type], :dispose, [state[:session]])
     Logger.debug("on stop")
 
     GenServer.cast(

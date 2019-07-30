@@ -8,7 +8,7 @@ defmodule ELM.GeneratorSupervisor do
   def init(_opts) do
     children = [
       ELM.Generator.Controller,
-      {Task.Supervisor, name: ELM.Generator}
+      ELM.Generator
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
