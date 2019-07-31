@@ -102,7 +102,7 @@ defmodule Postcard do
   def open_postcard_by_id(conn, id) do
     _ = get(conn, "/postcard/" <> id)
 
-    {conn, {:pacing, {1000, 500}, {:open_stamps, []}}}
+    {conn, {:pacing, {1000, 10000}, {:open_stamps, []}}}
   end
 
   def open_stamps(conn, _) do

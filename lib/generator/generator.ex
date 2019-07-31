@@ -19,7 +19,7 @@ defmodule ELM.Generator do
       %{
         id: ELM.UserExecutor,
         start: {ELM.UserExecutor, :start_link, [{type, args, callback}]},
-        restart: :permanent,
+        restart: :transient,
         shutdown: 5000,
         type: :worker
       }
@@ -27,12 +27,8 @@ defmodule ELM.Generator do
   end
 
   def stop_users do
-    children = DynamicSupervisor.which_children(__MODULE__)
-    children |> Enum.each(fn {_, pid, _, _} -> send(pid, {:stop}) end)
-
-    for {_, pid, _, _} <- children do
-      DynamicSupervisor.terminate_child(__MODULE__, pid)
-    end
+    DynamicSupervisor.which_children(__MODULE__)
+    |> Enum.each(fn {_, pid, _, _} -> send(pid, {:stop}) end)
   end
 
   def get_users_count do

@@ -5,7 +5,7 @@ defmodule TestPlan do
     user =
       pool("Postcard")
       |> produce(20, 60)
-      |> hold_on(240)
+      |> hold_on(60)
 
     [user]
   end

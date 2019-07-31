@@ -11,8 +11,6 @@ defmodule ELM.UserExecutor do
   # Server API
 
   def init({type, args, callback}) do
-    Process.flag(:trap_exit, true)
-
     do_restart()
 
     {:ok,
@@ -20,8 +18,7 @@ defmodule ELM.UserExecutor do
        user_type: type,
        init_args: args,
        callback: callback,
-       session: nil,
-       stopping: false
+       session: nil
      }}
   end
 
@@ -34,32 +31,25 @@ defmodule ELM.UserExecutor do
   end
 
   def handle_info({:execute_tran, tran}, state) do
-    unless state[:stopping] do
-      case tran do
-        {:pacing, time, tran} ->
-          normal_time = to_normal(time)
+    case tran do
+      {:pacing, time, tran} ->
+        normal_time = to_normal(time)
 
-          Process.send_after(self(), {:execute_tran, tran}, normal_time)
-          {:noreply, state}
+        Process.send_after(self(), {:execute_tran, tran}, normal_time)
+        {:noreply, state}
 
-        tran ->
-          case do_tran(tran, state) do
-            {:ok, session} -> {:noreply, %{state | session: session}}
-            :error -> {:noreply, state}
-          end
-      end
-    else
-      on_stop(state)
-      {:noreply, state}
+      tran ->
+        case do_tran(tran, state) do
+          {:ok, session} -> {:noreply, %{state | session: session}}
+          :error -> {:noreply, state}
+        end
     end
   end
 
-  def handle_info({:EXIT, _from, _reason}, state) do
-    {:noreply, stopping(state)}
-  end
-
   def handle_info({:stop}, state) do
-    {:noreply, stopping(state)}
+    on_stop(state)
+    Process.exit(self(), :normal)
+    {:noreply, state}
   end
 
   def handle_info(_msg, state) do
@@ -68,11 +58,8 @@ defmodule ELM.UserExecutor do
   end
 
   def terminate(_reason, state) do
-    {:noreply, stopping(state)}
-  end
-
-  defp stopping(state) do
-    %{state | stopping: true}
+    on_stop(state)
+    {:noreply, state}
   end
 
   defp do_tran(tran, state) do
@@ -132,10 +119,10 @@ defmodule ELM.UserExecutor do
   defp to_normal(time) do
     case time do
       {n, v} ->
-        round(:rand.normal(n, v))
+        round(abs(:rand.normal(n, v)))
 
       _ ->
-        round(:rand.normal(time, round(time / 10)))
+        round(abs(:rand.normal(time, time * 10)))
     end
   end
 
